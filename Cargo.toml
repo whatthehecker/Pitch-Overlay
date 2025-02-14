@@ -8,4 +8,6 @@ eframe = { version = "0.31.0", features = ["default"] }
 egui_plot = "0.31.0"
 egui_extras = { version = "0.31.0", features = ["default", "image"] }
 cpal = "0.15.3"
+ort = "2.0.0-rc.9"
+ndarray = "0.16.1"
 #tflite = "=0.9.7"
