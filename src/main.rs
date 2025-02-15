@@ -7,6 +7,8 @@ use eframe::{egui, Frame};
 use egui_plot::{HLine, Line, Plot, PlotBounds, PlotPoints};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use ort::session::Session;
+use crate::crepe::{CrepeModel, SAMPLES_PER_STEP};
 
 const CONFIG: StreamConfig = StreamConfig {
     channels: 1,
@@ -16,15 +18,12 @@ const CONFIG: StreamConfig = StreamConfig {
 };
 
 fn main() -> eframe::Result {
-    /*
     ort::init()
         .commit()
         .expect("Failed to init ort.");
     let session = Session::builder().unwrap()
         .commit_from_file("assets/crepe-full.onnx").unwrap();
     let crepe_model = CrepeModel::new(session);
-    
-     */
 
     let host = cpal::default_host();
     let all_devices = host.input_devices().expect("Failed to get input devices").map(|device| device.clone()).collect::<Vec<Device>>();
@@ -41,7 +40,7 @@ fn main() -> eframe::Result {
 
             Ok(Box::<MyApp>::new(MyApp::new(
                 all_devices,
-                //crepe_model,
+                crepe_model,
             )))
         }),
     )
@@ -49,6 +48,11 @@ fn main() -> eframe::Result {
 
 struct AudioState {
     first_audio_instant: Option<StreamInstant>,
+    // Temporary store for any audio data that was less than 1024 samples long.
+    // Some audio backends output less than 1024 samples per callback, so we need to aggregate
+    // some values until we have those 1024 entries.
+    recent_audio: Vec<i16>,
+    last_valid_frequency: Option<f32>,
     pitch_points: Vec<[f64; 2]>,
 }
 
@@ -56,6 +60,8 @@ impl Default for AudioState {
     fn default() -> Self {
         AudioState {
             first_audio_instant: None,
+            recent_audio: vec![],
+            last_valid_frequency: None,
             pitch_points: vec![],
         }
     }
@@ -70,7 +76,7 @@ struct MyApp {
 
     audio_state: Arc<RwLock<AudioState>>,
 
-    //crepe_model: Arc<CrepeModel>,
+    crepe_model: Arc<CrepeModel>,
 
     // TODO: turn these into [u32; 2]
     min_display_frequency: u32,
@@ -82,7 +88,7 @@ struct MyApp {
 }
 
 impl MyApp {
-    fn new(input_devices: Vec<Device>/*, crepe_model: CrepeModel */) -> Self {
+    fn new(input_devices: Vec<Device>, crepe_model: CrepeModel) -> Self {
         Self {
             name: "Arthur".to_owned(),
             age: 42,
@@ -92,7 +98,7 @@ impl MyApp {
 
             audio_state: Arc::new(RwLock::new(AudioState::default())),
 
-            //crepe_model: Arc::new(crepe_model),
+            crepe_model: Arc::new(crepe_model),
 
             min_display_frequency: 50,
             max_display_frequency: 500,
@@ -135,7 +141,7 @@ impl eframe::App for MyApp {
 
                                     let cloned_arc = Arc::clone(&self.audio_state);
                                     let cloned_ctx = ctx.clone();
-                                    //let model = Arc::clone(&self.crepe_model);
+                                    let model = Arc::clone(&self.crepe_model);
 
                                     self.current_stream = Some(self.available_input_devices[i].build_input_stream(
                                         &CONFIG,
@@ -148,12 +154,32 @@ impl eframe::App for MyApp {
                                                 println!("Updated first audio timestamp");
                                             }
 
-                                            let max_val = data.iter().max().copied().unwrap_or(0);
-                                            //let prediction = model.predict_single([0.0; 1024]);
-                                            let since_start = instant.duration_since(&audio_state.first_audio_instant.unwrap()).unwrap_or(Duration::ZERO);
+                                            // Aggregate audio samples, then calculate new pitch if
+                                            // at least 1024 samples are now in the buffer.
+                                            audio_state.recent_audio.extend_from_slice(data);
 
-                                            audio_state.pitch_points.push([since_start.as_secs_f64(), max_val as f64]);
-                                            println!("Data length: {}, max value: {}, since start: {}", data.len(), max_val, since_start.as_secs_f32());
+                                            let sample_count = audio_state.recent_audio.len();
+                                            if sample_count < SAMPLES_PER_STEP {
+                                                //println!("Not enough audio samples yet ({} samples), not running inference", sample_count);
+                                                return;
+                                            }
+
+                                            //println!("Aggregated enough audio ({} samples), running inference", sample_count);
+                                            let most_recent_audio: [i16; SAMPLES_PER_STEP] = (&audio_state.recent_audio[sample_count - SAMPLES_PER_STEP..sample_count]).try_into().unwrap();
+                                            let prediction = model.predict_single(most_recent_audio);
+                                            audio_state.recent_audio.clear();
+                                            
+                                            let effective_frequency = match prediction.confidence {
+                                                0.0..0.5 => f32::NAN,
+                                                _ => prediction.frequency,
+                                            };
+                                            let since_start = instant.duration_since(&audio_state.first_audio_instant.unwrap()).unwrap_or(Duration::ZERO);
+                                            audio_state.pitch_points.push([since_start.as_secs_f64(), effective_frequency as f64]);
+                                            if !effective_frequency.is_nan() {
+                                                audio_state.last_valid_frequency = Some(effective_frequency);
+                                            }
+                                            
+                                            //println!("Data length: {}, since start: {}, prediction: {:?}", data.len(), since_start.as_secs_f32(), prediction);
                                             // Explicitly trigger repaint since this thread otherwise is so high-priority that it
                                             // keeps on blocking the render thread through synchronization most of the time.
                                             cloned_ctx.request_repaint();
@@ -179,6 +205,7 @@ impl eframe::App for MyApp {
                 });
         }
 
+        let arc1 = Arc::clone(&self.audio_state);
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let pin_button = ui.add_sized([40.0, 40.0], egui::ImageButton::new(egui::include_image!("../assets/icons/pin.png")));
@@ -218,8 +245,8 @@ impl eframe::App for MyApp {
                     .color(Color32::PURPLE)
                 );
                 let audio_state = cloned_arc.read().unwrap();
-                let current_secs = if let Some(point) = audio_state.pitch_points.last() { 
-                    point[0] 
+                let current_secs = if let Some(point) = audio_state.pitch_points.last() {
+                    point[0]
                 } else {
                     10.0
                 };
@@ -233,8 +260,11 @@ impl eframe::App for MyApp {
             });
             // Place label over the created plot.
             let rect = response.response.rect;
-            // TODO: use actual calculated pitch.
-            let text = RichText::new(format!("{}Hz", 123)).size(30.0);
+            let display_frequency = match arc1.read().unwrap().last_valid_frequency {
+                None => "xxxHz".to_owned(),
+                Some(frequency) => format!("{}Hz", frequency as u32),
+            };
+            let text = RichText::new(display_frequency).size(30.0);
             let label = Label::new(text);
             ui.put(rect, label);
         });
