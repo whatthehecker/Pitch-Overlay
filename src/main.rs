@@ -33,7 +33,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "My egui App",
+        "Pitch Overlay",
         options,
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -41,6 +41,7 @@ fn main() -> eframe::Result {
             Ok(Box::<MyApp>::new(MyApp::new(
                 all_devices,
                 crepe_model,
+                Settings::default(),
             )))
         }),
     )
@@ -54,6 +55,25 @@ struct AudioState {
     recent_audio: Vec<i16>,
     last_valid_frequency: Option<f32>,
     pitch_points: Vec<[f64; 2]>,
+}
+
+/// Settings of the application which are persisted between sessions.
+struct Settings {
+    display_range: (u32, u32),
+    target_range: (u32, u32),
+    // TODO: add configurable color of target region
+    // TODO: uncomment and implement restoring last device on open if selected
+    //restore_last_device: bool,
+    //last_device_id: ???
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            display_range: (50, 500),
+            target_range: (185, 300),
+        }
+    }
 }
 
 impl Default for AudioState {
@@ -75,20 +95,14 @@ struct MyApp {
     available_input_devices: Vec<Device>,
 
     audio_state: Arc<RwLock<AudioState>>,
-
     crepe_model: Arc<CrepeModel>,
-
-    // TODO: turn these into [u32; 2]
-    min_display_frequency: u32,
-    max_display_frequency: u32,
-    min_target_frequency: u32,
-    max_target_frequency: u32,
+    settings: Settings,
 
     settings_open: bool,
 }
 
 impl MyApp {
-    fn new(input_devices: Vec<Device>, crepe_model: CrepeModel) -> Self {
+    fn new(input_devices: Vec<Device>, crepe_model: CrepeModel, settings: Settings) -> Self {
         Self {
             name: "Arthur".to_owned(),
             age: 42,
@@ -97,13 +111,8 @@ impl MyApp {
             available_input_devices: input_devices,
 
             audio_state: Arc::new(RwLock::new(AudioState::default())),
-
             crepe_model: Arc::new(crepe_model),
-
-            min_display_frequency: 50,
-            max_display_frequency: 500,
-            min_target_frequency: 185,
-            max_target_frequency: 300,
+            settings,
 
             settings_open: false,
         }
@@ -168,7 +177,7 @@ impl eframe::App for MyApp {
                                             let most_recent_audio: [i16; SAMPLES_PER_STEP] = (&audio_state.recent_audio[sample_count - SAMPLES_PER_STEP..sample_count]).try_into().unwrap();
                                             let prediction = model.predict_single(most_recent_audio);
                                             audio_state.recent_audio.clear();
-                                            
+
                                             let effective_frequency = match prediction.confidence {
                                                 0.0..0.5 => f32::NAN,
                                                 _ => prediction.frequency,
@@ -178,7 +187,7 @@ impl eframe::App for MyApp {
                                             if !effective_frequency.is_nan() {
                                                 audio_state.last_valid_frequency = Some(effective_frequency);
                                             }
-                                            
+
                                             //println!("Data length: {}, since start: {}, prediction: {:?}", data.len(), since_start.as_secs_f32(), prediction);
                                             // Explicitly trigger repaint since this thread otherwise is so high-priority that it
                                             // keeps on blocking the render thread through synchronization most of the time.
@@ -198,10 +207,24 @@ impl eframe::App for MyApp {
                     }
                     ui.add_space(20.0);
 
-                    ui.add(egui::Slider::new(&mut self.min_display_frequency, 0..=500).text("Min display"));
-                    ui.add(egui::Slider::new(&mut self.max_display_frequency, 0..=500).text("Max display"));
-                    ui.add(egui::Slider::new(&mut self.min_target_frequency, 0..=500).text("Min target"));
-                    ui.add(egui::Slider::new(&mut self.max_target_frequency, 0..=500).text("Max target"));
+                    let display_range_changed = ui.add(egui::Slider::new(&mut self.settings.display_range.0, 0..=499).text("Min display")).changed()
+                        | ui.add(egui::Slider::new(&mut self.settings.display_range.1, 0..=500).text("Max display")).changed();
+                    // TODO: persist changed values either here or somewhen later.
+                    if display_range_changed {
+                        let (lower, upper) = &mut self.settings.display_range;
+                        if lower >= upper {
+                            *upper = *lower + 1;
+                        }
+                    }
+
+                    let target_range_changed = ui.add(egui::Slider::new(&mut self.settings.target_range.0, 0..=499).text("Min target")).changed()
+                        | ui.add(egui::Slider::new(&mut self.settings.target_range.1, 0..=500).text("Max target")).changed();
+                    if target_range_changed {
+                        let (lower, upper) = &mut self.settings.target_range;
+                        if lower >= upper {
+                            *upper = *lower + 1;
+                        }
+                    }
                 });
         }
 
@@ -238,8 +261,8 @@ impl eframe::App for MyApp {
                 .allow_double_click_reset(false);
             let cloned_arc = Arc::clone(&self.audio_state);
             let response = plot.show(ui, move |plot_ui| {
-                let target_range_width = (self.max_target_frequency - self.min_target_frequency) as f64;
-                let middle_y = self.min_target_frequency as f64 + target_range_width / 2.0;
+                let target_range_width = (self.settings.target_range.1 - self.settings.target_range.0) as f64;
+                let middle_y = self.settings.target_range.0 as f64 + target_range_width / 2.0;
                 plot_ui.hline(HLine::new(middle_y)
                     .width(target_range_width as f32)
                     .color(Color32::PURPLE)
@@ -251,8 +274,8 @@ impl eframe::App for MyApp {
                     10.0
                 };
                 plot_ui.set_plot_bounds(PlotBounds::from_min_max(
-                    [current_secs - 10.0, self.min_display_frequency as f64],
-                    [current_secs, self.max_display_frequency as f64],
+                    [current_secs - 10.0, self.settings.display_range.0 as f64],
+                    [current_secs, self.settings.display_range.1 as f64],
                 ));
                 plot_ui.line(Line::new(PlotPoints::new(cloned_arc.read().unwrap().pitch_points.clone())));
                 plot_ui.line(Line::new(PlotPoints::from_ys_f32(&[1.0, 3.0, 2.0])));
