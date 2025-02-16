@@ -3,11 +3,12 @@ mod crepe;
 use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::{BufferSize, Device, SampleRate, Stream, StreamConfig, StreamInstant};
 use eframe::egui::{Color32, Context, Label, RichText};
-use eframe::{egui, Frame};
+use eframe::{egui, Frame, Storage};
 use egui_plot::{HLine, Line, Plot, PlotBounds, PlotPoints};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use ort::session::Session;
+use serde::{Deserialize, Serialize};
 use crate::crepe::{CrepeModel, SAMPLES_PER_STEP};
 
 const CONFIG: StreamConfig = StreamConfig {
@@ -16,6 +17,7 @@ const CONFIG: StreamConfig = StreamConfig {
     // 1024 is 64 milliseconds, the smallest unit that CREPE can handle.
     buffer_size: BufferSize::Fixed(1024),
 };
+const SETTINGS_STORAGE_KEY: &str = "settings";
 
 fn main() -> eframe::Result {
     ort::init()
@@ -26,8 +28,11 @@ fn main() -> eframe::Result {
     let crepe_model = CrepeModel::new(session);
 
     let host = cpal::default_host();
-    let all_devices = host.input_devices().expect("Failed to get input devices").map(|device| device.clone()).collect::<Vec<Device>>();
-
+    let all_devices = host.input_devices()
+        .expect("Failed to get input devices")
+        .map(|device| device.clone())
+        .collect::<Vec<Device>>();
+    
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([320.0, 240.0]),
         ..Default::default()
@@ -37,11 +42,21 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
+            
+            let stored_settings = match cc.storage {
+                Some(storage) => {
+                    match storage.get_string(SETTINGS_STORAGE_KEY) {
+                        Some(content) => serde_json::from_str(content.as_str()).unwrap_or(Settings::default()),
+                        None => Settings::default(),
+                    }
+                },
+                None => Settings::default(),
+            };
 
             Ok(Box::<MyApp>::new(MyApp::new(
                 all_devices,
                 crepe_model,
-                Settings::default(),
+                stored_settings,
             )))
         }),
     )
@@ -58,6 +73,7 @@ struct AudioState {
 }
 
 /// Settings of the application which are persisted between sessions.
+#[derive(Debug, Serialize, Deserialize)]
 struct Settings {
     display_range: (u32, u32),
     target_range: (u32, u32),
@@ -88,8 +104,6 @@ impl Default for AudioState {
 }
 
 struct MyApp {
-    name: String,
-    age: u32,
     current_stream: Option<Stream>,
     current_device_index: Option<usize>,
     available_input_devices: Vec<Device>,
@@ -104,8 +118,6 @@ struct MyApp {
 impl MyApp {
     fn new(input_devices: Vec<Device>, crepe_model: CrepeModel, settings: Settings) -> Self {
         Self {
-            name: "Arthur".to_owned(),
-            age: 42,
             current_stream: None,
             current_device_index: None,
             available_input_devices: input_devices,
@@ -118,9 +130,9 @@ impl MyApp {
         }
     }
 
-    fn current_device(&self) -> Option<Device> {
+    fn current_device(&self) -> Option<&Device> {
         if let Some(i) = self.current_device_index {
-            return Some(self.available_input_devices[i].clone());
+            return Some(&self.available_input_devices[i]);
         }
 
         None
@@ -243,16 +255,7 @@ impl eframe::App for MyApp {
                     self.settings_open = true;
                 }
             });
-            ui.heading("my cool egui application");
-            ui.horizontal(|ui| {
-                let name_label = ui.label("Your name: ");
-                ui.text_edit_singleline(&mut self.name).labelled_by(name_label.id);
-            });
-            ui.add(egui::Slider::new(&mut self.age, 0..=120).text("age"));
-            if ui.button("Increment").clicked() {
-                self.age += 1;
-            }
-            ui.label(format!("Hello {}, age {}", self.name, self.age));
+            // TODO: maybe display hint to choose audio device if nothing is selected here
 
             let plot = Plot::new("My plot")
                 .allow_zoom(false)
@@ -291,5 +294,16 @@ impl eframe::App for MyApp {
             let label = Label::new(text);
             ui.put(rect, label);
         });
+    }
+
+    fn save(&mut self, storage: &mut dyn Storage) {
+        println!("Saving settings...");
+        match serde_json::to_string(&self.settings) {
+            Ok(json) => {
+                storage.set_string(SETTINGS_STORAGE_KEY, json);
+                println!("Saved settings.");
+            },
+            Err(e) => println!("Error saving settings: {}", e),
+        }
     }
 }
