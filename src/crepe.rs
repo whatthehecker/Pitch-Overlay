@@ -1,10 +1,11 @@
 use std::convert::TryInto;
 use std::iter::Iterator;
+use lazy_static::lazy_static;
 use ndarray::{Array};
 use ort::inputs;
 use ort::session::{Session, SessionOutputs};
 
-// TODO: document that this code is adapted from the official CREPE Python package 
+// TODO: document that this code is adapted from the official CREPE Python package
 // TODO: add license that is compatible with CREPE's license
 
 #[derive(Debug)]
@@ -43,6 +44,15 @@ pub struct CrepeModel {
     model: Session,
 }
 
+lazy_static! {
+    static ref CENTS_MAPPING: [f32; 360] = (0..360)
+        .map(|x| x as f32 * 20.0 + 1997.3794084376191)
+        .collect::<Vec<f32>>()
+        .try_into()
+        .unwrap();
+
+}
+
 impl CrepeModel {
     pub fn new(model: Session) -> Self {
         CrepeModel {
@@ -69,19 +79,10 @@ impl CrepeModel {
     }
 
     fn to_local_average_cents(&self, activation: Activation) -> f32 {
-        // TODO: needs testing whether this results in the correct factors compared to Python source.
-        let cents_mapping: [f32; 360] = (0..360)
-            .map(|x| x as f32 * (7180.0 / 360.0) + 1997.3794084376191)
-            .collect::<Vec<f32>>()
-            .try_into()
-            .unwrap();
-
         let center = argmax(&activation).unwrap();
-
         let start = center.saturating_sub(4);
-        let end = 1024.min(center + 5);
-        // TODO: this is still somewhat wrong, sometimes i == 360 but len == 360.
-        let product_sum: f32 = (start..end).map(|i| activation[i] * cents_mapping[i]).sum();
+        let end = (center + 5).min(activation.len());
+        let product_sum: f32 = (start..end).map(|i| activation[i] * CENTS_MAPPING[i]).sum();
         let weight_sum: f32 = activation.iter().sum();
 
         product_sum / weight_sum
@@ -100,3 +101,19 @@ impl CrepeModel {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use approx::assert_relative_eq;
+    use crate::crepe::*;
+    
+    #[test]
+    fn test_cents_mapping() {
+        // Values taken as calculated by Python code.
+        assert_relative_eq!(CENTS_MAPPING[0], 1997.37940844);
+        assert_relative_eq!(CENTS_MAPPING[1], 2017.37940844);
+        assert_relative_eq!(CENTS_MAPPING[358], 9157.37940844);
+        assert_relative_eq!(CENTS_MAPPING[359], 9177.37940844);
+    }
+    
+    // TODO: add tests for comparing calculated output of some example audio with Python output.
+}
