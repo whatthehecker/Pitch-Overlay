@@ -73,10 +73,11 @@ struct AudioState {
 }
 
 /// Settings of the application which are persisted between sessions.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 struct Settings {
     display_range: (u32, u32),
     target_range: (u32, u32),
+    confidence_threshold: f32,
     // TODO: add configurable color of target region
     // TODO: uncomment and implement restoring last device on open if selected
     //restore_last_device: bool,
@@ -88,6 +89,7 @@ impl Default for Settings {
         Settings {
             display_range: (50, 500),
             target_range: (185, 300),
+            confidence_threshold: 0.5,
         }
     }
 }
@@ -141,6 +143,8 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
+        // TODO: move device selection from settings onto main screen (maybe hide it if something is selected until hovering over the window though)
+        
         if self.settings_open {
             let current_device_name = self.current_device().map(|device| device.name().unwrap_or("Unnamed device".to_owned())).unwrap_or("Audio disconnected".to_owned());
 
@@ -163,6 +167,8 @@ impl eframe::App for MyApp {
                                     let cloned_arc = Arc::clone(&self.audio_state);
                                     let cloned_ctx = ctx.clone();
                                     let model = Arc::clone(&self.crepe_model);
+                                    
+                                    let settings = self.settings;
 
                                     self.current_stream = Some(self.available_input_devices[i].build_input_stream(
                                         &CONFIG,
@@ -181,26 +187,24 @@ impl eframe::App for MyApp {
 
                                             let sample_count = audio_state.recent_audio.len();
                                             if sample_count < SAMPLES_PER_STEP {
-                                                //println!("Not enough audio samples yet ({} samples), not running inference", sample_count);
                                                 return;
                                             }
-
-                                            //println!("Aggregated enough audio ({} samples), running inference", sample_count);
+                                            
                                             let most_recent_audio: [i16; SAMPLES_PER_STEP] = (&audio_state.recent_audio[sample_count - SAMPLES_PER_STEP..sample_count]).try_into().unwrap();
                                             let prediction = model.predict_single(most_recent_audio);
                                             audio_state.recent_audio.clear();
-
-                                            let effective_frequency = match prediction.confidence {
-                                                0.0..0.5 => f32::NAN,
-                                                _ => prediction.frequency,
+                                            
+                                            let effective_frequency = if prediction.confidence >= settings.confidence_threshold { 
+                                                prediction.frequency
+                                            } else { 
+                                                f32::NAN 
                                             };
                                             let since_start = instant.duration_since(&audio_state.first_audio_instant.unwrap()).unwrap_or(Duration::ZERO);
                                             audio_state.pitch_points.push([since_start.as_secs_f64(), effective_frequency as f64]);
                                             if !effective_frequency.is_nan() {
                                                 audio_state.last_valid_frequency = Some(effective_frequency);
                                             }
-
-                                            //println!("Data length: {}, since start: {}, prediction: {:?}", data.len(), since_start.as_secs_f32(), prediction);
+                                            
                                             // Explicitly trigger repaint since this thread otherwise is so high-priority that it
                                             // keeps on blocking the render thread through synchronization most of the time.
                                             cloned_ctx.request_repaint();
@@ -218,10 +222,12 @@ impl eframe::App for MyApp {
                         self.available_input_devices = cpal::default_host().input_devices().expect("Failed to get input devices").collect();
                     }
                     ui.add_space(20.0);
+                    
+                    ui.add(egui::Slider::new(&mut self.settings.confidence_threshold, 0.0..=1.0).text("Pitch confidence threshold"));
+                    ui.add_space(20.0);
 
                     let display_range_changed = ui.add(egui::Slider::new(&mut self.settings.display_range.0, 0..=499).text("Min display")).changed()
-                        | ui.add(egui::Slider::new(&mut self.settings.display_range.1, 0..=500).text("Max display")).changed();
-                    // TODO: persist changed values either here or somewhen later.
+                        | ui.add(egui::Slider::new(&mut self.settings.display_range.1, 1..=500).text("Max display")).changed();
                     if display_range_changed {
                         let (lower, upper) = &mut self.settings.display_range;
                         if lower >= upper {
@@ -230,7 +236,7 @@ impl eframe::App for MyApp {
                     }
 
                     let target_range_changed = ui.add(egui::Slider::new(&mut self.settings.target_range.0, 0..=499).text("Min target")).changed()
-                        | ui.add(egui::Slider::new(&mut self.settings.target_range.1, 0..=500).text("Max target")).changed();
+                        | ui.add(egui::Slider::new(&mut self.settings.target_range.1, 1..=500).text("Max target")).changed();
                     if target_range_changed {
                         let (lower, upper) = &mut self.settings.target_range;
                         if lower >= upper {
