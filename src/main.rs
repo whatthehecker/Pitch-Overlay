@@ -2,11 +2,12 @@ mod crepe;
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::{BufferSize, Device, SampleRate, Stream, StreamConfig, StreamInstant};
-use eframe::egui::{Color32, Context, Label, RichText};
+use eframe::egui::{Color32, Context, Label, Rgba, RichText};
 use eframe::{egui, Frame, Storage};
 use egui_plot::{HLine, Line, Plot, PlotBounds, PlotPoints};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use eframe::egui::color_picker::Alpha;
 use ort::session::Session;
 use serde::{Deserialize, Serialize};
 use crate::crepe::{CrepeModel, SAMPLES_PER_STEP};
@@ -78,6 +79,7 @@ struct Settings {
     display_range: (u32, u32),
     target_range: (u32, u32),
     confidence_threshold: f32,
+    target_color: Rgba,
     // TODO: add configurable color of target region
     // TODO: uncomment and implement restoring last device on open if selected
     //restore_last_device: bool,
@@ -90,6 +92,7 @@ impl Default for Settings {
             display_range: (50, 500),
             target_range: (185, 300),
             confidence_threshold: 0.5,
+            target_color: Rgba::from(Color32::LIGHT_GREEN),
         }
     }
 }
@@ -225,6 +228,13 @@ impl eframe::App for MyApp {
                     
                     ui.add(egui::Slider::new(&mut self.settings.confidence_threshold, 0.0..=1.0).text("Pitch confidence threshold"));
                     ui.add_space(20.0);
+                    
+                    ui.horizontal(|ui| {
+                        // TODO: right-align these, looks weird
+                        egui::widgets::color_picker::color_edit_button_rgba(ui, &mut self.settings.target_color, Alpha::BlendOrAdditive);
+                        ui.add(Label::new("Target region color"));
+                    });
+                    ui.add_space(20.0);
 
                     let display_range_changed = ui.add(egui::Slider::new(&mut self.settings.display_range.0, 0..=499).text("Min display")).changed()
                         | ui.add(egui::Slider::new(&mut self.settings.display_range.1, 1..=500).text("Max display")).changed();
@@ -274,7 +284,7 @@ impl eframe::App for MyApp {
                 let middle_y = self.settings.target_range.0 as f64 + target_range_width / 2.0;
                 plot_ui.hline(HLine::new(middle_y)
                     .width(target_range_width as f32)
-                    .color(Color32::PURPLE)
+                    .color(self.settings.target_color)
                 );
                 let audio_state = cloned_arc.read().unwrap();
                 let current_secs = if let Some(point) = audio_state.pitch_points.last() {
@@ -297,6 +307,7 @@ impl eframe::App for MyApp {
                 Some(frequency) => format!("{}Hz", frequency as u32),
             };
             let text = RichText::new(display_frequency).size(30.0);
+            // TODO: this needs to be rendered e. g. with a white outline to be visible on all colors. 
             let label = Label::new(text);
             ui.put(rect, label);
         });
