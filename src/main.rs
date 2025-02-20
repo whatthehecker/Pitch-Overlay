@@ -33,7 +33,7 @@ fn main() -> eframe::Result {
         .expect("Failed to get input devices")
         .map(|device| device.clone())
         .collect::<Vec<Device>>();
-    
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([320.0, 240.0]),
         ..Default::default()
@@ -43,7 +43,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            
+
             let stored_settings = match cc.storage {
                 Some(storage) => {
                     match storage.get_string(SETTINGS_STORAGE_KEY) {
@@ -147,7 +147,7 @@ impl MyApp {
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         // TODO: move device selection from settings onto main screen (maybe hide it if something is selected until hovering over the window though)
-        
+
         if self.settings_open {
             let current_device_name = self.current_device().map(|device| device.name().unwrap_or("Unnamed device".to_owned())).unwrap_or("Audio disconnected".to_owned());
 
@@ -170,7 +170,7 @@ impl eframe::App for MyApp {
                                     let cloned_arc = Arc::clone(&self.audio_state);
                                     let cloned_ctx = ctx.clone();
                                     let model = Arc::clone(&self.crepe_model);
-                                    
+
                                     let settings = self.settings;
 
                                     self.current_stream = Some(self.available_input_devices[i].build_input_stream(
@@ -192,22 +192,22 @@ impl eframe::App for MyApp {
                                             if sample_count < SAMPLES_PER_STEP {
                                                 return;
                                             }
-                                            
+
                                             let most_recent_audio: [i16; SAMPLES_PER_STEP] = (&audio_state.recent_audio[sample_count - SAMPLES_PER_STEP..sample_count]).try_into().unwrap();
                                             let prediction = model.predict_single(most_recent_audio);
                                             audio_state.recent_audio.clear();
-                                            
-                                            let effective_frequency = if prediction.confidence >= settings.confidence_threshold { 
+
+                                            let effective_frequency = if prediction.confidence >= settings.confidence_threshold {
                                                 prediction.frequency
-                                            } else { 
-                                                f32::NAN 
+                                            } else {
+                                                f32::NAN
                                             };
                                             let since_start = instant.duration_since(&audio_state.first_audio_instant.unwrap()).unwrap_or(Duration::ZERO);
                                             audio_state.pitch_points.push([since_start.as_secs_f64(), effective_frequency as f64]);
                                             if !effective_frequency.is_nan() {
                                                 audio_state.last_valid_frequency = Some(effective_frequency);
                                             }
-                                            
+
                                             // Explicitly trigger repaint since this thread otherwise is so high-priority that it
                                             // keeps on blocking the render thread through synchronization most of the time.
                                             cloned_ctx.request_repaint();
@@ -225,28 +225,43 @@ impl eframe::App for MyApp {
                         self.available_input_devices = cpal::default_host().input_devices().expect("Failed to get input devices").collect();
                     }
                     ui.add_space(20.0);
-                    
+
                     ui.add(egui::Slider::new(&mut self.settings.confidence_threshold, 0.0..=1.0).text("Pitch confidence threshold"));
                     ui.add_space(20.0);
-                    
+
                     ui.horizontal(|ui| {
                         // TODO: right-align these, looks weird
                         egui::widgets::color_picker::color_edit_button_rgba(ui, &mut self.settings.target_color, Alpha::BlendOrAdditive);
-                        ui.add(Label::new("Target region color"));
+                        ui.add(Label::new("Target region color")).on_hover_ui(|ui| {
+                            ui.label("Color of the target region on the plot");
+                        });
                     });
                     ui.add_space(20.0);
 
-                    let display_range_changed = ui.add(egui::Slider::new(&mut self.settings.display_range.0, 0..=499).text("Min display")).changed()
-                        | ui.add(egui::Slider::new(&mut self.settings.display_range.1, 1..=500).text("Max display")).changed();
+                    let min_display_response = ui.add(egui::Slider::new(&mut self.settings.display_range.0, 0..=499).text("Min display")).on_hover_ui(|ui| {
+                        ui.label("Minimum frequency to display on the graph.");
+                    });
+                    let max_display_response = ui.add(egui::Slider::new(&mut self.settings.display_range.1, 1..=500).text("Max display")).on_hover_ui(|ui| {
+                        ui.label("Maximum frequency to display on the graph");
+                    });
+                    let display_range_changed = min_display_response.changed()
+                        | max_display_response.changed();
                     if display_range_changed {
                         let (lower, upper) = &mut self.settings.display_range;
                         if lower >= upper {
                             *upper = *lower + 1;
                         }
                     }
-
-                    let target_range_changed = ui.add(egui::Slider::new(&mut self.settings.target_range.0, 0..=499).text("Min target")).changed()
-                        | ui.add(egui::Slider::new(&mut self.settings.target_range.1, 1..=500).text("Max target")).changed();
+                    
+                    // TODO: these only show tooltips when the slider itself is hovered, while the color setting shows its tooltip when the label is hovered, that's inconsistent.
+                    let min_target_response = ui.add(egui::Slider::new(&mut self.settings.target_range.0, 0..=499).text("Min target")).on_hover_ui(|ui| {
+                        ui.label("Minimum frequency you are aiming for");
+                    });
+                    let max_target_response = ui.add(egui::Slider::new(&mut self.settings.target_range.1, 1..=500).text("Max target")).on_hover_ui(|ui| {
+                        ui.label("Maximum frequency you are aiming for");
+                    });
+                    let target_range_changed = min_target_response.changed()
+                        | max_target_response.changed();
                     if target_range_changed {
                         let (lower, upper) = &mut self.settings.target_range;
                         if lower >= upper {
@@ -305,7 +320,7 @@ impl eframe::App for MyApp {
                 Some(frequency) => format!("{}Hz", frequency as u32),
             };
             let text = RichText::new(display_frequency).size(30.0);
-            // TODO: this needs to be rendered e. g. with a white outline to be visible on all colors. 
+            // TODO: this needs to be rendered e. g. with a white outline to be visible on all colors.
             let label = Label::new(text);
             ui.put(rect, label);
         });
