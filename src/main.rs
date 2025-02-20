@@ -297,8 +297,6 @@ impl eframe::App for MyApp {
                     [current_secs, self.settings.display_range.1 as f64],
                 ));
                 plot_ui.line(Line::new(PlotPoints::new(cloned_arc.read().unwrap().pitch_points.clone())));
-                plot_ui.line(Line::new(PlotPoints::from_ys_f32(&[1.0, 3.0, 2.0])));
-                plot_ui.line(Line::new(PlotPoints::new(vec![[4.0, 4.0], [5.0, 5.0], [6.0, 6.0]])))
             });
             // Place label over the created plot.
             let rect = response.response.rect;
