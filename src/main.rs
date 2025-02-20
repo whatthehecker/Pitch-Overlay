@@ -90,6 +90,7 @@ struct Settings {
     target_range: (u32, u32),
     confidence_threshold: f32,
     target_color: Rgba,
+    label_color: Rgba,
     // TODO: add configurable color of target region
     // TODO: uncomment and implement restoring last device on open if selected
     //restore_last_device: bool,
@@ -103,6 +104,7 @@ impl Default for Settings {
             target_range: (185, 300),
             confidence_threshold: 0.5,
             target_color: Rgba::from(Color32::LIGHT_GREEN),
+            label_color: Rgba::from(Color32::WHITE),
         }
     }
 }
@@ -172,6 +174,12 @@ impl eframe::App for MyApp {
                         ui.add(Label::new("Target region color")).on_hover_ui(|ui| {
                             ui.label("Color of the target region on the plot");
                         });
+                    });
+                    ui.horizontal(|ui| {
+                        egui::widgets::color_picker::color_edit_button_rgba(ui, &mut self.settings.label_color, Alpha::BlendOrAdditive);
+                        ui.add(Label::new("Pitch label color")).on_hover_ui(|ui| {
+                            ui.label("Color in the center of the plot of the label that displays your current pitch");
+                        })
                     });
                     ui.add_space(20.0);
 
@@ -290,7 +298,7 @@ impl eframe::App for MyApp {
                 }
                 // Right-align buttons by filling remaining space.
                 ui.add_space(ui.available_width() - (80.0 + 5.0));
-                
+
                 let pin_button = ui.add_sized([40.0, 40.0], egui::ImageButton::new(egui::include_image!("../assets/icons/pin.png")));
                 let settings_button = ui.add_sized([40.0, 40.0], egui::ImageButton::new(egui::include_image!("../assets/icons/settings.png")));
 
@@ -303,6 +311,7 @@ impl eframe::App for MyApp {
             });
 
             let current_device_index = self.current_device_index;
+            let label_color = self.settings.label_color;
             let plot = Plot::new("My plot")
                 .allow_zoom(false)
                 .allow_scroll(false)
@@ -337,8 +346,7 @@ impl eframe::App for MyApp {
                 }.to_owned(),
                 Some(frequency) => format!("{}Hz", frequency as u32),
             };
-            let text = RichText::new(display_frequency).size(30.0);
-            // TODO: this needs to be rendered e. g. with a white outline to be visible on all colors.
+            let text = RichText::new(display_frequency).size(30.0).color(label_color);
             let label = Label::new(text);
             ui.put(rect, label);
         });
