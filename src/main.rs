@@ -15,7 +15,7 @@ use crate::crepe::{CrepeModel};
 const SETTINGS_STORAGE_KEY: &str = "settings";
 
 /// The number of CREPE predictions to combine into a single averaged pitch value.
-/// 
+///
 /// By default, CREPE takes 64 millis of audio which results in really fast predictions that are all
 /// over the place.
 /// To display anything useful, aggregate a multiple of 64 milliseconds of audio, run pitch prediction
@@ -60,7 +60,7 @@ fn main() -> eframe::Result {
                         Some(content) => serde_json::from_str(content.as_str()).unwrap_or(Settings::default()),
                         None => Settings::default(),
                     }
-                },
+                }
                 None => Settings::default(),
             };
 
@@ -159,88 +159,10 @@ impl eframe::App for MyApp {
         // TODO: move device selection from settings onto main screen (maybe hide it if something is selected until hovering over the window though)
 
         if self.settings_open {
-            let current_device_name = self.current_device().map(|device| device.name().unwrap_or("Unnamed device".to_owned())).unwrap_or("Audio disconnected".to_owned());
-
             egui::Window::new("Settings")
                 .collapsible(false)
                 .open(&mut self.settings_open)
                 .show(ctx, |ui| {
-                    egui::ComboBox::from_label("Audio Input device")
-                        .selected_text(format!("{}", current_device_name))
-                        .show_ui(ui, |ui| {
-                            if ui.selectable_value(&mut self.current_device_index, None, "Disconnect audio").clicked() {
-                                println!("Disconnect clicked!");
-                                self.current_stream = None;
-                            }
-                            for (i, device) in self.available_input_devices.iter().enumerate() {
-                                let name = device.name().unwrap_or("Unknown device".to_owned());
-                                if ui.selectable_value(&mut self.current_device_index, Some(i), name).clicked() {
-                                    println!("Connect to new device clicked!");
-
-                                    let cloned_arc = Arc::clone(&self.audio_state);
-                                    let cloned_ctx = ctx.clone();
-                                    let model = Arc::clone(&self.crepe_model);
-
-                                    let settings = self.settings;
-
-                                    self.current_stream = Some(self.available_input_devices[i].build_input_stream(
-                                        &CONFIG,
-                                        move |data: &[i16], info| {
-                                            let instant = info.timestamp().callback;
-
-                                            let mut audio_state = cloned_arc.write().unwrap();
-                                            if let None = audio_state.first_audio_instant {
-                                                audio_state.first_audio_instant = Some(instant);
-                                                println!("Updated first audio timestamp");
-                                            }
-                                            
-                                            audio_state.recent_audio.extend_from_slice(data);
-
-                                            let sample_count = audio_state.recent_audio.len();
-                                            if sample_count < MIN_SAMPLES_PER_DISPLAY {
-                                                return;
-                                            }
-
-                                            let most_recent_audio: [i16; MIN_SAMPLES_PER_DISPLAY] = (&audio_state.recent_audio[sample_count - MIN_SAMPLES_PER_DISPLAY..sample_count]).try_into().unwrap();
-                                            let predictions = most_recent_audio.chunks_exact(crepe::SAMPLES_PER_STEP)
-                                                .map(|chunk| model.predict_single(chunk.try_into().unwrap()))
-                                                .filter(|prediction| 
-                                                    prediction.confidence >= settings.confidence_threshold 
-                                                        && prediction.frequency >= settings.display_range.0 as f32 
-                                                        && prediction.frequency <= settings.display_range.1 as f32)
-                                                .map(|prediction| prediction.frequency)
-                                                .collect::<Vec<f32>>();
-                                            let average_pitch = if predictions.is_empty() { 
-                                                f32::NAN 
-                                            } else { 
-                                                predictions.iter().sum::<f32>() / predictions.len() as f32
-                                            };
-                                            audio_state.recent_audio.clear();
-                                            
-                                            let since_start = instant.duration_since(&audio_state.first_audio_instant.unwrap()).unwrap_or(Duration::ZERO);
-                                            audio_state.pitch_points.push([since_start.as_secs_f64(), average_pitch as f64]);
-                                            if !average_pitch.is_nan() {
-                                                audio_state.last_valid_frequency = Some(average_pitch);
-                                            }
-
-                                            // Explicitly trigger repaint since this thread otherwise is so high-priority that it
-                                            // keeps on blocking the render thread through synchronization most of the time.
-                                            cloned_ctx.request_repaint();
-                                        },
-                                        move |err| {
-                                            println!("Error: {:?}", err);
-                                        },
-                                        None,
-                                    ).expect("Failed to create input stream!"));
-                                    // TODO: call play on stream.
-                                }
-                            }
-                        });
-                    if ui.button("Reload devices").clicked() {
-                        self.available_input_devices = cpal::default_host().input_devices().expect("Failed to get input devices").collect();
-                    }
-                    ui.add_space(20.0);
-
                     ui.add(egui::Slider::new(&mut self.settings.confidence_threshold, 0.0..=1.0).text("Pitch confidence threshold"));
                     ui.add_space(20.0);
 
@@ -267,7 +189,7 @@ impl eframe::App for MyApp {
                             *upper = *lower + 1;
                         }
                     }
-                    
+
                     // TODO: these only show tooltips when the slider itself is hovered, while the color setting shows its tooltip when the label is hovered, that's inconsistent.
                     let min_target_response = ui.add(egui::Slider::new(&mut self.settings.target_range.0, 0..=499).text("Min target")).on_hover_ui(|ui| {
                         ui.label("Minimum frequency you are aiming for");
@@ -288,10 +210,88 @@ impl eframe::App for MyApp {
 
         let arc1 = Arc::clone(&self.audio_state);
         egui::CentralPanel::default().show(ctx, |ui| {
+            let current_device_name = self.current_device().map(|device| device.name().unwrap_or("Unnamed device".to_owned())).unwrap_or("Audio disconnected".to_owned());
+
             ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt("Audio Input device")
+                    .truncate()
+                    .selected_text(format!("{}", current_device_name))
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_value(&mut self.current_device_index, None, "Disconnect audio").clicked() {
+                            println!("Disconnect clicked!");
+                            self.current_stream = None;
+                        }
+                        for (i, device) in self.available_input_devices.iter().enumerate() {
+                            let name = device.name().unwrap_or("Unknown device".to_owned());
+                            if ui.selectable_value(&mut self.current_device_index, Some(i), name).clicked() {
+                                println!("Connect to new device clicked!");
+
+                                let cloned_arc = Arc::clone(&self.audio_state);
+                                let cloned_ctx = ctx.clone();
+                                let model = Arc::clone(&self.crepe_model);
+
+                                let settings = self.settings;
+
+                                self.current_stream = Some(self.available_input_devices[i].build_input_stream(
+                                    &CONFIG,
+                                    move |data: &[i16], info| {
+                                        let instant = info.timestamp().callback;
+
+                                        let mut audio_state = cloned_arc.write().unwrap();
+                                        if let None = audio_state.first_audio_instant {
+                                            audio_state.first_audio_instant = Some(instant);
+                                            println!("Updated first audio timestamp");
+                                        }
+
+                                        audio_state.recent_audio.extend_from_slice(data);
+
+                                        let sample_count = audio_state.recent_audio.len();
+                                        if sample_count < MIN_SAMPLES_PER_DISPLAY {
+                                            return;
+                                        }
+
+                                        let most_recent_audio: [i16; MIN_SAMPLES_PER_DISPLAY] = (&audio_state.recent_audio[sample_count - MIN_SAMPLES_PER_DISPLAY..sample_count]).try_into().unwrap();
+                                        let predictions = most_recent_audio.chunks_exact(crepe::SAMPLES_PER_STEP)
+                                            .map(|chunk| model.predict_single(chunk.try_into().unwrap()))
+                                            .filter(|prediction|
+                                                prediction.confidence >= settings.confidence_threshold
+                                                    && prediction.frequency >= settings.display_range.0 as f32
+                                                    && prediction.frequency <= settings.display_range.1 as f32)
+                                            .map(|prediction| prediction.frequency)
+                                            .collect::<Vec<f32>>();
+                                        let average_pitch = if predictions.is_empty() {
+                                            f32::NAN
+                                        } else {
+                                            predictions.iter().sum::<f32>() / predictions.len() as f32
+                                        };
+                                        audio_state.recent_audio.clear();
+
+                                        let since_start = instant.duration_since(&audio_state.first_audio_instant.unwrap()).unwrap_or(Duration::ZERO);
+                                        audio_state.pitch_points.push([since_start.as_secs_f64(), average_pitch as f64]);
+                                        if !average_pitch.is_nan() {
+                                            audio_state.last_valid_frequency = Some(average_pitch);
+                                        }
+
+                                        // Explicitly trigger repaint since this thread otherwise is so high-priority that it
+                                        // keeps on blocking the render thread through synchronization most of the time.
+                                        cloned_ctx.request_repaint();
+                                    },
+                                    move |err| {
+                                        println!("Error: {:?}", err);
+                                    },
+                                    None,
+                                ).expect("Failed to create input stream!"));
+                                // TODO: call play on stream.
+                            }
+                        }
+                    });
+                if ui.button("Reload devices").clicked() {
+                    self.available_input_devices = cpal::default_host().input_devices().expect("Failed to get input devices").collect();
+                }
+                // Right-align buttons by filling remaining space.
+                ui.add_space(ui.available_width() - (80.0 + 5.0));
+                
                 let pin_button = ui.add_sized([40.0, 40.0], egui::ImageButton::new(egui::include_image!("../assets/icons/pin.png")));
-                // Right-align settings button by filling remaining space.
-                ui.add_space(ui.available_width() - 40.0);
                 let settings_button = ui.add_sized([40.0, 40.0], egui::ImageButton::new(egui::include_image!("../assets/icons/settings.png")));
 
                 if pin_button.clicked() {
@@ -301,8 +301,8 @@ impl eframe::App for MyApp {
                     self.settings_open = true;
                 }
             });
-            // TODO: maybe display hint to choose audio device if nothing is selected here
 
+            let current_device_index = self.current_device_index;
             let plot = Plot::new("My plot")
                 .allow_zoom(false)
                 .allow_scroll(false)
@@ -331,7 +331,10 @@ impl eframe::App for MyApp {
             // Place label over the created plot.
             let rect = response.response.rect;
             let display_frequency = match arc1.read().unwrap().last_valid_frequency {
-                None => "xxxHz".to_owned(),
+                None => match current_device_index {
+                    None => "No device selected.",
+                    Some(_) => "Waiting for audio data...",
+                }.to_owned(),
                 Some(frequency) => format!("{}Hz", frequency as u32),
             };
             let text = RichText::new(display_frequency).size(30.0);
@@ -347,7 +350,7 @@ impl eframe::App for MyApp {
             Ok(json) => {
                 storage.set_string(SETTINGS_STORAGE_KEY, json);
                 println!("Saved settings.");
-            },
+            }
             Err(e) => println!("Error saving settings: {}", e),
         }
     }
