@@ -10,15 +10,25 @@ use std::time::Duration;
 use eframe::egui::color_picker::Alpha;
 use ort::session::Session;
 use serde::{Deserialize, Serialize};
-use crate::crepe::{CrepeModel, SAMPLES_PER_STEP};
+use crate::crepe::{CrepeModel};
+
+const SETTINGS_STORAGE_KEY: &str = "settings";
+
+/// The number of CREPE predictions to combine into a single averaged pitch value.
+/// 
+/// By default, CREPE takes 64 millis of audio which results in really fast predictions that are all
+/// over the place.
+/// To display anything useful, aggregate a multiple of 64 milliseconds of audio, run pitch prediction
+/// on each 64 millis chunk and average the values.
+const STEPS_PER_DISPLAY: usize = 2;
+
+const MIN_SAMPLES_PER_DISPLAY: usize = STEPS_PER_DISPLAY * crepe::SAMPLES_PER_STEP;
 
 const CONFIG: StreamConfig = StreamConfig {
     channels: 1,
-    sample_rate: SampleRate(16_000),
-    // 1024 is 64 milliseconds, the smallest unit that CREPE can handle.
-    buffer_size: BufferSize::Fixed(1024),
+    sample_rate: SampleRate(crepe::SAMPLE_RATE),
+    buffer_size: BufferSize::Fixed(MIN_SAMPLES_PER_DISPLAY as u32),
 };
-const SETTINGS_STORAGE_KEY: &str = "settings";
 
 fn main() -> eframe::Result {
     ort::init()
@@ -183,29 +193,34 @@ impl eframe::App for MyApp {
                                                 audio_state.first_audio_instant = Some(instant);
                                                 println!("Updated first audio timestamp");
                                             }
-
-                                            // Aggregate audio samples, then calculate new pitch if
-                                            // at least 1024 samples are now in the buffer.
+                                            
                                             audio_state.recent_audio.extend_from_slice(data);
 
                                             let sample_count = audio_state.recent_audio.len();
-                                            if sample_count < SAMPLES_PER_STEP {
+                                            if sample_count < MIN_SAMPLES_PER_DISPLAY {
                                                 return;
                                             }
 
-                                            let most_recent_audio: [i16; SAMPLES_PER_STEP] = (&audio_state.recent_audio[sample_count - SAMPLES_PER_STEP..sample_count]).try_into().unwrap();
-                                            let prediction = model.predict_single(most_recent_audio);
-                                            audio_state.recent_audio.clear();
-
-                                            let effective_frequency = if prediction.confidence >= settings.confidence_threshold {
-                                                prediction.frequency
-                                            } else {
-                                                f32::NAN
+                                            let most_recent_audio: [i16; MIN_SAMPLES_PER_DISPLAY] = (&audio_state.recent_audio[sample_count - MIN_SAMPLES_PER_DISPLAY..sample_count]).try_into().unwrap();
+                                            let predictions = most_recent_audio.chunks_exact(crepe::SAMPLES_PER_STEP)
+                                                .map(|chunk| model.predict_single(chunk.try_into().unwrap()))
+                                                .filter(|prediction| 
+                                                    prediction.confidence >= settings.confidence_threshold 
+                                                        && prediction.frequency >= settings.display_range.0 as f32 
+                                                        && prediction.frequency <= settings.display_range.1 as f32)
+                                                .map(|prediction| prediction.frequency)
+                                                .collect::<Vec<f32>>();
+                                            let average_pitch = if predictions.is_empty() { 
+                                                f32::NAN 
+                                            } else { 
+                                                predictions.iter().sum::<f32>() / predictions.len() as f32
                                             };
+                                            audio_state.recent_audio.clear();
+                                            
                                             let since_start = instant.duration_since(&audio_state.first_audio_instant.unwrap()).unwrap_or(Duration::ZERO);
-                                            audio_state.pitch_points.push([since_start.as_secs_f64(), effective_frequency as f64]);
-                                            if !effective_frequency.is_nan() {
-                                                audio_state.last_valid_frequency = Some(effective_frequency);
+                                            audio_state.pitch_points.push([since_start.as_secs_f64(), average_pitch as f64]);
+                                            if !average_pitch.is_nan() {
+                                                audio_state.last_valid_frequency = Some(average_pitch);
                                             }
 
                                             // Explicitly trigger repaint since this thread otherwise is so high-priority that it
