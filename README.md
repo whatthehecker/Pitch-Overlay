@@ -6,7 +6,7 @@ Useful if you are doing voice training and want to keep an eye on your pitch whi
 ![Screenshot of the main window displaying the pitch graph.](docs/ui-screenshot.png "The main window")
 
 ## Install
-1. Download the release for your operating system and the CREPE model file from the [releases tab](TODO).
+1. Download the release for your operating system and the CREPE model file from the [releases tab](https://github.com/whatthehecker/Pitch-Overlay/releases).
 2. Extract the ZIP somewhere and copy the model file into the folder. Make sure it is in the same directory as the executable itself.
 
 ## Known issues
