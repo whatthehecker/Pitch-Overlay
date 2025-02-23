@@ -1,6 +1,6 @@
 mod crepe;
 
-use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, Device, SampleRate, Stream, StreamConfig, StreamInstant};
 use eframe::egui::{Color32, Context, Label, Rgba, RichText, ViewportCommand, WindowLevel};
 use eframe::{egui, Frame, Storage};
@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::crepe::{CrepeModel};
 
 const SETTINGS_STORAGE_KEY: &str = "settings";
+const ONNX_MODEL_PATH: &str = "crepe-full.onnx";
 
 /// The number of CREPE predictions to combine into a single averaged pitch value.
 ///
@@ -34,8 +35,10 @@ fn main() -> eframe::Result {
     ort::init()
         .commit()
         .expect("Failed to init ort.");
-    let session = Session::builder().unwrap()
-        .commit_from_file("assets/crepe-full.onnx").unwrap();
+    let session = Session::builder()
+        .expect("Failed to create ONNX session.")
+        .commit_from_file(ONNX_MODEL_PATH)
+        .expect(format!("Failed to find model file at \"{}\"", ONNX_MODEL_PATH).as_str());
     let crepe_model = CrepeModel::new(session);
 
     let host = cpal::default_host();
@@ -64,7 +67,7 @@ fn main() -> eframe::Result {
                 None => Settings::default(),
             };
 
-            Ok(Box::<MyApp>::new(MyApp::new(
+            Ok(Box::<PitchOverlayApp>::new(PitchOverlayApp::new(
                 all_devices,
                 crepe_model,
                 stored_settings,
@@ -133,7 +136,7 @@ impl Default for AudioState {
     }
 }
 
-struct MyApp {
+struct PitchOverlayApp {
     current_stream: Option<Stream>,
     current_device_index: Option<usize>,
     available_input_devices: Vec<Device>,
@@ -141,11 +144,11 @@ struct MyApp {
     audio_state: Arc<RwLock<AudioState>>,
     crepe_model: Arc<CrepeModel>,
     settings: Settings,
-    
+
     window_state: WindowState,
 }
 
-impl MyApp {
+impl PitchOverlayApp {
     fn new(input_devices: Vec<Device>, crepe_model: CrepeModel, settings: Settings) -> Self {
         Self {
             current_stream: None,
@@ -169,7 +172,7 @@ impl MyApp {
     }
 }
 
-impl eframe::App for MyApp {
+impl eframe::App for PitchOverlayApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         if self.window_state.are_settings_open {
             egui::Window::new("Settings")
@@ -251,7 +254,7 @@ impl eframe::App for MyApp {
 
                                 let settings = self.settings;
 
-                                self.current_stream = Some(self.available_input_devices[i].build_input_stream(
+                                match self.available_input_devices[i].build_input_stream(
                                     &CONFIG,
                                     move |data: &[i16], info| {
                                         let instant = info.timestamp().callback;
@@ -299,20 +302,35 @@ impl eframe::App for MyApp {
                                         println!("Error: {:?}", err);
                                     },
                                     None,
-                                ).expect("Failed to create input stream!"));
-                                // TODO: call play on stream.
+                                ) {
+                                    Err(e) => {
+                                        self.current_stream = None;
+                                        self.current_device_index = None;
+                                        // TODO: display error in UI.
+                                    }
+                                    Ok(stream) => {
+                                        match stream.play() {
+                                            Err(e) => {
+                                                // TODO: display error in UI.
+                                                self.current_stream = None;
+                                                self.current_device_index = None;
+                                            },
+                                            Ok(_) => self.current_stream = Some(stream),
+                                        }
+                                    }
+                                };
                             }
                         }
                     });
                 if ui.button("Reload devices").clicked() {
                     self.available_input_devices = cpal::default_host().input_devices().expect("Failed to get input devices").collect();
                 }
-                
+
                 let checkbox_changed = ui.add_sized([80.0, 20.0], egui::Checkbox::new(&mut self.window_state.is_always_on_top, "Always on top")).changed();
                 let settings_button = ui.add_sized([100.0, 20.0], egui::Button::new("Settings"));
 
                 if checkbox_changed {
-                    let new_level = if self.window_state.is_always_on_top { 
+                    let new_level = if self.window_state.is_always_on_top {
                         WindowLevel::AlwaysOnTop
                     } else {
                         WindowLevel::Normal
