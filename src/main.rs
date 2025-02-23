@@ -2,7 +2,7 @@ mod crepe;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, Device, SampleRate, Stream, StreamConfig, StreamInstant};
-use eframe::egui::{Color32, Context, Label, Rgba, RichText, ViewportCommand, WindowLevel};
+use eframe::egui::{Align2, Color32, Context, Label, Rgba, RichText, ViewportCommand, WindowLevel};
 use eframe::{egui, Frame, Storage};
 use egui_plot::{HLine, Line, Plot, PlotBounds, PlotPoints};
 use std::sync::{Arc, RwLock};
@@ -79,6 +79,7 @@ fn main() -> eframe::Result {
 struct WindowState {
     is_always_on_top: bool,
     are_settings_open: bool,
+    error_message: Option<String>,
 }
 
 impl Default for WindowState {
@@ -86,18 +87,9 @@ impl Default for WindowState {
         WindowState {
             is_always_on_top: false,
             are_settings_open: false,
+            error_message: None,
         }
     }
-}
-
-struct AudioState {
-    first_audio_instant: Option<StreamInstant>,
-    // Temporary store for any audio data that was less than 1024 samples long.
-    // Some audio backends output less than 1024 samples per callback, so we need to aggregate
-    // some values until we have those 1024 entries.
-    recent_audio: Vec<i16>,
-    last_valid_frequency: Option<f32>,
-    pitch_points: Vec<[f64; 2]>,
 }
 
 /// Settings of the application which are persisted between sessions.
@@ -123,6 +115,16 @@ impl Default for Settings {
             label_color: Rgba::from(Color32::WHITE),
         }
     }
+}
+
+struct AudioState {
+    first_audio_instant: Option<StreamInstant>,
+    // Temporary store for any audio data that was less than 1024 samples long.
+    // Some audio backends output less than 1024 samples per callback, so we need to aggregate
+    // some values until we have those 1024 entries.
+    recent_audio: Vec<i16>,
+    last_valid_frequency: Option<f32>,
+    pitch_points: Vec<[f64; 2]>,
 }
 
 impl Default for AudioState {
@@ -230,6 +232,21 @@ impl eframe::App for PitchOverlayApp {
                 });
         }
 
+        if let Some(message) = self.window_state.error_message.clone() {
+            egui::Window::new("Error")
+                .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+                .auto_sized()
+                .collapsible(false)
+                .show(&ctx, |ui| {
+                    ui.label(message);
+                    ui.vertical_centered(|ui| {
+                        if ui.button("Ok").clicked() {
+                            self.window_state.error_message = None;
+                        }
+                    });
+                });
+        }
+
         let arc1 = Arc::clone(&self.audio_state);
         egui::CentralPanel::default().show(ctx, |ui| {
             let current_device_name = self.current_device().map(|device| device.name().unwrap_or("Unnamed device".to_owned())).unwrap_or("Audio disconnected".to_owned());
@@ -306,16 +323,23 @@ impl eframe::App for PitchOverlayApp {
                                     Err(e) => {
                                         self.current_stream = None;
                                         self.current_device_index = None;
-                                        // TODO: display error in UI.
+
+                                        println!("Error creating input stream: {}", e);
+                                        self.window_state.error_message = Some(format!("Error creating input stream: {}", e));
                                     }
                                     Ok(stream) => {
                                         match stream.play() {
                                             Err(e) => {
-                                                // TODO: display error in UI.
                                                 self.current_stream = None;
                                                 self.current_device_index = None;
-                                            },
-                                            Ok(_) => self.current_stream = Some(stream),
+
+                                                println!("Error starting input stream: {}", e);
+                                                self.window_state.error_message = Some(format!("Error starting input stream: {}", e));
+                                            }
+                                            Ok(_) => {
+                                                println!("Started audio stream.");
+                                                self.current_stream = Some(stream)
+                                            }
                                         }
                                     }
                                 };
