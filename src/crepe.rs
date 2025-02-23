@@ -1,6 +1,5 @@
 use std::convert::TryInto;
 use std::iter::Iterator;
-use std::time::Duration;
 use lazy_static::lazy_static;
 use ndarray::{Array};
 use ort::inputs;
@@ -22,10 +21,6 @@ pub const SAMPLE_RATE: u32 = 16_000;
 pub const SAMPLES_PER_STEP: usize = 1024;
 
 type Activation = [f32; 360];
-
-pub const fn duration_to_samples(duration: Duration) -> usize {
-    (duration.as_secs_f64() * 16_000f64) as usize
-}
 
 fn argmax(values: &[f32]) -> Option<usize> {
     values.iter()
@@ -114,13 +109,6 @@ impl CrepeModel {
 mod tests {
     use approx::assert_relative_eq;
     use crate::crepe::*;
-    
-    #[test]
-    fn duration_to_samples_is_correct() {
-        assert_eq!(duration_to_samples(Duration::from_millis(64)), 1024);
-        assert_eq!(duration_to_samples(Duration::from_secs(1)), 16_000);
-        assert_eq!(duration_to_samples(Duration::from_millis(100)), (0.1 * 16_000.0) as usize);
-    }
     
     #[test]
     fn test_cents_mapping() {

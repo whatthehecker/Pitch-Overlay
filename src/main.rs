@@ -2,7 +2,7 @@ mod crepe;
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::{BufferSize, Device, SampleRate, Stream, StreamConfig, StreamInstant};
-use eframe::egui::{Color32, Context, Label, Rgba, RichText};
+use eframe::egui::{Color32, Context, Label, Rgba, RichText, ViewportCommand, WindowLevel};
 use eframe::{egui, Frame, Storage};
 use egui_plot::{HLine, Line, Plot, PlotBounds, PlotPoints};
 use std::sync::{Arc, RwLock};
@@ -73,6 +73,20 @@ fn main() -> eframe::Result {
     )
 }
 
+struct WindowState {
+    is_always_on_top: bool,
+    are_settings_open: bool,
+}
+
+impl Default for WindowState {
+    fn default() -> Self {
+        WindowState {
+            is_always_on_top: false,
+            are_settings_open: false,
+        }
+    }
+}
+
 struct AudioState {
     first_audio_instant: Option<StreamInstant>,
     // Temporary store for any audio data that was less than 1024 samples long.
@@ -91,7 +105,6 @@ struct Settings {
     confidence_threshold: f32,
     target_color: Rgba,
     label_color: Rgba,
-    // TODO: add configurable color of target region
     // TODO: uncomment and implement restoring last device on open if selected
     //restore_last_device: bool,
     //last_device_id: ???
@@ -128,8 +141,8 @@ struct MyApp {
     audio_state: Arc<RwLock<AudioState>>,
     crepe_model: Arc<CrepeModel>,
     settings: Settings,
-
-    settings_open: bool,
+    
+    window_state: WindowState,
 }
 
 impl MyApp {
@@ -143,7 +156,7 @@ impl MyApp {
             crepe_model: Arc::new(crepe_model),
             settings,
 
-            settings_open: false,
+            window_state: WindowState::default(),
         }
     }
 
@@ -158,12 +171,10 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
-        // TODO: move device selection from settings onto main screen (maybe hide it if something is selected until hovering over the window though)
-
-        if self.settings_open {
+        if self.window_state.are_settings_open {
             egui::Window::new("Settings")
                 .collapsible(false)
-                .open(&mut self.settings_open)
+                .open(&mut self.window_state.are_settings_open)
                 .show(ctx, |ui| {
                     ui.add(egui::Slider::new(&mut self.settings.confidence_threshold, 0.0..=1.0).text("Pitch confidence threshold"));
                     ui.add_space(20.0);
@@ -220,7 +231,7 @@ impl eframe::App for MyApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let current_device_name = self.current_device().map(|device| device.name().unwrap_or("Unnamed device".to_owned())).unwrap_or("Audio disconnected".to_owned());
 
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 egui::ComboBox::from_id_salt("Audio Input device")
                     .truncate()
                     .selected_text(format!("{}", current_device_name))
@@ -296,17 +307,20 @@ impl eframe::App for MyApp {
                 if ui.button("Reload devices").clicked() {
                     self.available_input_devices = cpal::default_host().input_devices().expect("Failed to get input devices").collect();
                 }
-                // Right-align buttons by filling remaining space.
-                ui.add_space(ui.available_width() - (80.0 + 5.0));
+                
+                let checkbox_changed = ui.add_sized([80.0, 20.0], egui::Checkbox::new(&mut self.window_state.is_always_on_top, "Always on top")).changed();
+                let settings_button = ui.add_sized([100.0, 20.0], egui::Button::new("Settings"));
 
-                let pin_button = ui.add_sized([40.0, 40.0], egui::ImageButton::new(egui::include_image!("../assets/icons/pin.png")));
-                let settings_button = ui.add_sized([40.0, 40.0], egui::ImageButton::new(egui::include_image!("../assets/icons/settings.png")));
-
-                if pin_button.clicked() {
-                    // TODO: Set window level depending on whether button is clicked
+                if checkbox_changed {
+                    let new_level = if self.window_state.is_always_on_top { 
+                        WindowLevel::AlwaysOnTop
+                    } else {
+                        WindowLevel::Normal
+                    };
+                    ctx.send_viewport_cmd(ViewportCommand::WindowLevel(new_level))
                 }
                 if settings_button.clicked() {
-                    self.settings_open = true;
+                    self.window_state.are_settings_open = true;
                 }
             });
 
