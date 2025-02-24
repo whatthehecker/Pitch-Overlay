@@ -6,8 +6,8 @@ use ort::inputs;
 use ort::session::{Session, SessionOutputs};
 
 // TODO: document that this code is adapted from the official CREPE Python package
-// TODO: add license that is compatible with CREPE's license
 
+/// Outputs of the CREPE model for a single 1024-sample audio chunk.
 #[derive(Debug)]
 pub struct Prediction {
     pub frequency: f32,
@@ -92,6 +92,7 @@ impl CrepeModel {
         product_sum / weight_sum
     }
 
+    /// Calculates the model output for a single audio chunk.
     pub fn predict_single(&self, audio: [i16; SAMPLES_PER_STEP]) -> Prediction {
         let activation = self.get_activation(audio);
         let confidence = activation.into_iter().reduce(f32::max).unwrap_or(0.0);
