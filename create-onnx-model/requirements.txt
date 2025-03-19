@@ -1,0 +1,4 @@
+crepe==0.0.16
+tensorflow==2.19.0
+tf2onnx==1.16.1
+numpy<2.0.0
