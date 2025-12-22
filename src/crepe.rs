@@ -119,6 +119,24 @@ mod tests {
         assert_relative_eq!(CENTS_MAPPING[358], 9157.37940844);
         assert_relative_eq!(CENTS_MAPPING[359], 9177.37940844);
     }
+
+    #[test]
+    fn test_predict_single() -> Result<(), Box<dyn std::error::Error>> {
+        let sample_bytes = std::fs::read("test-data/sweep_samples.npy")?;
+        let frequency_bytes = std::fs::read("test-data/sweep_frequencies.npy")?;
+        let confidence_bytes = std::fs::read("test-data/sweep_confidences.npy")?;
+
+        let sample_npy = npyz::NpyFile::new(&sample_bytes[..])?;
+        let frequency_npy = npyz::NpyFile::new(&frequency_bytes[..])?;
+        let confidence_npy = npyz::NpyFile::new(&confidence_bytes[..])?;
+
+        let sample_data = sample_npy.into_vec::<f32>()?;
+        // Frequency is output as f64 for some reason, while the rest is f32.
+        let frequency_data = frequency_npy.into_vec::<f64>()?;
+        let confidence_data = confidence_npy.into_vec::<f32>()?;
+
+        Ok(())
+    }
     
     // TODO: add tests for comparing calculated output of some example audio with Python output.
 }
