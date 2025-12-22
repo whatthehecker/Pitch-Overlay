@@ -52,9 +52,6 @@ pub(crate) struct Settings {
     confidence_threshold: f32,
     target_color: Rgba,
     label_color: Rgba,
-    // TODO: uncomment and implement restoring last device on open if selected
-    //restore_last_device: bool,
-    //last_device_id: ???
 }
 
 impl Default for Settings {
@@ -220,7 +217,7 @@ impl eframe::App for PitchOverlayApp {
                             self.current_stream = None;
                         }
 
-                        for (i, device) in self.available_input_devices.iter().enumerate() {
+                        for device in self.available_input_devices.iter() {
                             let current_device_id = match &self.current_device {
                                 None => None,
                                 Some(dev) => dev.id().ok(),
@@ -244,7 +241,7 @@ impl eframe::App for PitchOverlayApp {
 
                                 let settings = self.settings;
 
-                                match self.available_input_devices[i].build_input_stream(
+                                match device.build_input_stream(
                                     &CONFIG,
                                     move |data: &[i16], info| {
                                         let instant = info.timestamp().callback;
@@ -332,6 +329,7 @@ impl eframe::App for PitchOverlayApp {
                                         }
                                         Ok(_) => {
                                             println!("Started audio stream.");
+                                            self.current_device = Some(device.clone());
                                             self.current_stream = Some(stream)
                                         }
                                     },
