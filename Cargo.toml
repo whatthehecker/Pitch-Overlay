@@ -7,7 +7,7 @@ edition = "2021"
 eframe = { version = "0.31.0", features = ["default", "persistence"] }
 egui_plot = "0.31.0"
 egui_extras = { version = "0.31.0", features = ["default", "image"] }
-cpal = "0.15.3"
+cpal = "0.17.0"
 ort = "2.0.0-rc.9"
 ndarray = "0.16.1"
 lazy_static = "1.5.0"
