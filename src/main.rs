@@ -3,8 +3,6 @@ mod app;
 
 use crate::app::{PitchOverlayApp, Settings, SETTINGS_STORAGE_KEY};
 use crate::crepe::CrepeModel;
-use cpal::traits::HostTrait;
-use cpal::Device;
 use eframe::{egui, CreationContext};
 use ort::session::Session;
 
@@ -27,12 +25,6 @@ fn main() -> eframe::Result {
         .expect(format!("Failed to find model file at \"{}\"", ONNX_MODEL_PATH).as_str());
     let crepe_model = CrepeModel::new(session);
 
-    let host = cpal::default_host();
-    let all_devices = host.input_devices()
-        .expect("Failed to get input devices")
-        .map(|device| device.clone())
-        .collect::<Vec<Device>>();
-
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([320.0, 240.0]),
         ..Default::default()
@@ -46,7 +38,6 @@ fn main() -> eframe::Result {
             let settings = read_stored_settings(cc).unwrap_or(Settings::default());
 
             Ok(Box::<PitchOverlayApp>::new(PitchOverlayApp::new(
-                all_devices,
                 crepe_model,
                 settings,
             )))

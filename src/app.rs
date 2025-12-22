@@ -101,14 +101,16 @@ pub(crate) struct PitchOverlayApp {
 
 impl PitchOverlayApp {
     pub(crate) fn new(
-        input_devices: Vec<Device>,
         crepe_model: CrepeModel,
         settings: Settings,
     ) -> Self {
         Self {
             current_stream: None,
             current_device: None,
-            available_input_devices: input_devices,
+            available_input_devices: cpal::default_host()
+                .input_devices()
+                .expect("Failed to get input devices")
+                .collect(),
 
             audio_state: Arc::new(RwLock::new(AudioState::default())),
             crepe_model: Arc::new(crepe_model),
