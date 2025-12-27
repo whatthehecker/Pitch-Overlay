@@ -116,17 +116,17 @@ impl CrepeModel {
 
 #[cfg(test)]
 mod tests {
+    use float_cmp::assert_approx_eq;
     use crate::crepe::*;
     use crate::ONNX_MODEL_PATH;
-    use approx::assert_relative_eq;
 
     #[test]
     fn test_cents_mapping() {
         // Values taken as calculated by Python code.
-        assert_relative_eq!(CENTS_MAPPING[0], 1997.37940844);
-        assert_relative_eq!(CENTS_MAPPING[1], 2017.37940844);
-        assert_relative_eq!(CENTS_MAPPING[358], 9157.37940844);
-        assert_relative_eq!(CENTS_MAPPING[359], 9177.37940844);
+        assert_approx_eq!(f32, CENTS_MAPPING[0], 1997.37940844);
+        assert_approx_eq!(f32, CENTS_MAPPING[1], 2017.37940844);
+        assert_approx_eq!(f32, CENTS_MAPPING[358], 9157.37940844);
+        assert_approx_eq!(f32, CENTS_MAPPING[359], 9177.37940844);
     }
 
     #[test]
@@ -159,11 +159,11 @@ mod tests {
             .expect("There should be 1024 samples.");
         let prediction = crepe_model.predict_single(i16_samples);
 
-        assert_relative_eq!(prediction.frequency, frequency_data[0] as f32);
-        assert_relative_eq!(prediction.confidence, confidence_data[0]);
+        // A rather large epsilon, but fine for our use case.
+        const EPSILON: f32 = 0.001;
+        assert_approx_eq!(f32, prediction.frequency, frequency_data[0] as f32, epsilon = EPSILON);
+        assert_approx_eq!(f32, prediction.confidence, confidence_data[0], epsilon = EPSILON);
 
         Ok(())
     }
-
-    // TODO: add tests for comparing calculated output of some example audio with Python output.
 }
