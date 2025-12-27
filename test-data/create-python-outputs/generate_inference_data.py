@@ -13,6 +13,7 @@ DATA_GLOB = '*.wav'
 
 TARGET_SAMPLE_RATE = 16_000
 SAMPLES_PER_CHUNK = 1_024
+MILLISECONDS_PER_SECOND = 1_000
 
 @dataclasses.dataclass
 class TestDataTuple:
@@ -35,12 +36,14 @@ def generate_input_and_output_data(wav_file: Path) -> TestDataTuple:
     if sr != TARGET_SAMPLE_RATE:
         audio = resample(audio, sr, TARGET_SAMPLE_RATE)
 
+    chunk_length_in_seconds = SAMPLES_PER_CHUNK / TARGET_SAMPLE_RATE
     _, frequency, confidence, __ = crepe.predict(
         audio=audio,
         sr=sr,
         model_capacity='full',
         center=False,
-        step_size=int((SAMPLES_PER_CHUNK / TARGET_SAMPLE_RATE) * 1000),
+        viterbi=False,
+        step_size=int(chunk_length_in_seconds * MILLISECONDS_PER_SECOND),
     )
 
     return TestDataTuple(audio_samples=audio, frequency=frequency, confidence=confidence)
