@@ -1,9 +1,9 @@
-use std::convert::TryInto;
-use std::iter::Iterator;
 use lazy_static::lazy_static;
-use ndarray::{Array};
+use ndarray::Array;
 use ort::inputs;
 use ort::session::{Session, SessionOutputs};
+use std::convert::TryInto;
+use std::iter::Iterator;
 
 // TODO: document that this code is adapted from the official CREPE Python package
 
@@ -23,7 +23,8 @@ pub const SAMPLES_PER_STEP: usize = 1024;
 type Activation = [f32; 360];
 
 fn argmax(values: &[f32]) -> Option<usize> {
-    values.iter()
+    values
+        .iter()
         .enumerate()
         .max_by(|(_, a), (_, b)| a.total_cmp(b))
         .map(|(i, _)| i)
@@ -35,11 +36,15 @@ fn mean(values: &[f32]) -> f32 {
 
 fn std(values: &[f32]) -> f32 {
     let mean = mean(values);
-    let variance = values.iter().map(|value| {
-        let diff = mean - *value;
+    let variance = values
+        .iter()
+        .map(|value| {
+            let diff = mean - *value;
 
-        diff * diff
-    }).sum::<f32>() / values.len() as f32;
+            diff * diff
+        })
+        .sum::<f32>()
+        / values.len() as f32;
 
     variance.sqrt()
 }
@@ -54,29 +59,32 @@ lazy_static! {
         .collect::<Vec<f32>>()
         .try_into()
         .unwrap();
-
 }
 
 impl CrepeModel {
     pub fn new(model: Session) -> Self {
-        CrepeModel {
-            model
-        }
+        CrepeModel { model }
     }
 
     fn get_activation(&self, audio: [i16; SAMPLES_PER_STEP]) -> Activation {
-        let audio = audio.map(|x| x as f32);
+        let audio = audio.map(|x| x as f32 / i16::MAX as f32);
         // Pad audio with 512 zeros from either side.
         // TODO: check whether this is actually needed.
         //let mut centered_audio = [0.0; 512 + 1024 + 512];
         //centered_audio[512..(512 + 1024)].copy_from_slice(audio.as_slice());
         let mean = mean(&audio);
-        let std = std(&audio);
+        let centered_audio = audio.map(|x| x - mean);
+        let std = std(&centered_audio);
         let clipped_std = std.clamp(1e-8, f32::MAX);
         let normalized_audio = audio.map(|x| (x - mean) / clipped_std);
 
-        let input= Array::from_iter(normalized_audio).into_shape_with_order((1, 1024)).unwrap();
-        let outputs: SessionOutputs = self.model.run(inputs!["input" => input.view()].unwrap()).unwrap();
+        let input = Array::from_iter(normalized_audio)
+            .into_shape_with_order((1, 1024))
+            .unwrap();
+        let outputs: SessionOutputs = self
+            .model
+            .run(inputs!["input" => input.view()].unwrap())
+            .unwrap();
         let output = outputs["output_0"].try_extract_tensor::<f32>().unwrap();
 
         output.as_slice().unwrap().try_into().unwrap()
@@ -87,7 +95,7 @@ impl CrepeModel {
         let start = center.saturating_sub(4);
         let end = (center + 5).min(activation.len());
         let product_sum: f32 = (start..end).map(|i| activation[i] * CENTS_MAPPING[i]).sum();
-        let weight_sum: f32 = activation.iter().sum();
+        let weight_sum: f32 = (start..end).map(|i| activation[i]).sum();
 
         product_sum / weight_sum
     }
@@ -108,9 +116,10 @@ impl CrepeModel {
 
 #[cfg(test)]
 mod tests {
-    use approx::assert_relative_eq;
     use crate::crepe::*;
-    
+    use crate::ONNX_MODEL_PATH;
+    use approx::assert_relative_eq;
+
     #[test]
     fn test_cents_mapping() {
         // Values taken as calculated by Python code.
@@ -122,6 +131,10 @@ mod tests {
 
     #[test]
     fn test_predict_single() -> Result<(), Box<dyn std::error::Error>> {
+        ort::init().commit()?;
+        let session = Session::builder()?.commit_from_file(ONNX_MODEL_PATH)?;
+        let crepe_model = CrepeModel::new(session);
+
         let sample_bytes = std::fs::read("test-data/sweep_samples.npy")?;
         let frequency_bytes = std::fs::read("test-data/sweep_frequencies.npy")?;
         let confidence_bytes = std::fs::read("test-data/sweep_confidences.npy")?;
@@ -135,8 +148,22 @@ mod tests {
         let frequency_data = frequency_npy.into_vec::<f64>()?;
         let confidence_data = confidence_npy.into_vec::<f32>()?;
 
+        const U16_MAX: f32 = u16::MAX as f32;
+        // TODO: build chunks of 1024 samples instead of only a single chunk.
+        let i16_samples: [i16; SAMPLES_PER_STEP] = sample_data
+            .iter()
+            .map(|sample| ((U16_MAX / 2.0) * sample) as i16)
+            .take(SAMPLES_PER_STEP)
+            .collect::<Vec<i16>>()
+            .try_into()
+            .expect("There should be 1024 samples.");
+        let prediction = crepe_model.predict_single(i16_samples);
+
+        assert_relative_eq!(prediction.frequency, frequency_data[0] as f32);
+        assert_relative_eq!(prediction.confidence, confidence_data[0]);
+
         Ok(())
     }
-    
+
     // TODO: add tests for comparing calculated output of some example audio with Python output.
 }
