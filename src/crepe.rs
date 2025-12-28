@@ -1,11 +1,14 @@
+//! Implements the CREPE neural-network-based pitch tracker.
+//! This code is based on and adapted from the original at https://github.com/marl/crepe, most
+//! of it from `crepe/core.py`.
+//! It has been modified to only keep the code necessary for this implementation's use cases.
+
 use lazy_static::lazy_static;
 use ndarray::Array;
 use ort::inputs;
 use ort::session::{Session, SessionOutputs};
 use std::convert::TryInto;
 use std::iter::Iterator;
-
-// TODO: document that this code is adapted from the official CREPE Python package
 
 /// Outputs of the CREPE model for a single 1024-sample audio chunk.
 #[derive(Debug)]
@@ -68,10 +71,6 @@ impl CrepeModel {
 
     fn get_activation(&self, audio: [i16; SAMPLES_PER_STEP]) -> Activation {
         let audio = audio.map(|x| x as f32 / i16::MAX as f32);
-        // Pad audio with 512 zeros from either side.
-        // TODO: check whether this is actually needed.
-        //let mut centered_audio = [0.0; 512 + 1024 + 512];
-        //centered_audio[512..(512 + 1024)].copy_from_slice(audio.as_slice());
         let mean = mean(&audio);
         let centered_audio = audio.map(|x| x - mean);
         let std = std(&centered_audio);
@@ -129,6 +128,9 @@ mod tests {
         assert_approx_eq!(f32, CENTS_MAPPING[359], 9177.37940844);
     }
 
+    /// Tests that the frequency and confidence predictions made by the Rust implementation
+    /// closely match those of the Python implementation for the given sample .wav files in the
+    /// "test-data/" directory.
     #[test]
     fn test_predict_single() -> Result<(), Box<dyn std::error::Error>> {
         ort::init().commit()?;
